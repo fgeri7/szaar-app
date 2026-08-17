@@ -765,6 +765,7 @@
       hostName: "",
       sessionName: "",
       linkedSessionId: null,
+      activeTableId: null,
       lobbySeatOrder: [],
       lobbyAiDifficulty: {},
       lobbyTargetScore: 100,
@@ -1342,9 +1343,10 @@
     else if(ui.screen==="onlineHome") html += renderOnlineHome();
     else if(ui.screen==="onlineCreate") html += renderOnlineCreate();
     else if(ui.screen==="onlineManualSetup") html += renderOnlineManualSetup();
+    else if(ui.screen==="onlineAddTable") html += renderOnlineAddTable();
     else if(ui.screen==="onlineJoin") html += renderOnlineJoin();
     else if(ui.screen==="onlineLobby") html += renderOnlineLobby();
-    else if(ui.screen==="onlineGame") html += ui.online.room && ui.online.room.game ? (ui.online.room.game.mode==="manual" ? renderOnlineManualGame(ui.online.room) : renderPlayTable(ui.online.room.game)) : `<div class="panel"><div class="empty-msg">Betöltés…</div></div>`;
+    else if(ui.screen==="onlineGame") html += renderOnlineGameScreen();
     else if(ui.screen==="activeGame") html += renderActiveGame();
     else if(ui.screen==="history") html += renderHistory();
     else if(ui.screen==="gameDetail") html += renderGameDetail();
@@ -1476,7 +1478,6 @@
     } else {
       html += state.players.map(p=>{
         const s = computeStats(p.id);
-        const canDelete = !state.games.some(g=>g.seating.includes(p.id));
         const isMe = p.id===state.myPlayerId;
         return `
         <div class="roster-row">
@@ -1487,7 +1488,7 @@
             <span>💩: <b>${s.losses}</b></span>
             <span>Átl: <b>${s.avg!==null? s.avg.toFixed(1):"–"}</b></span>
             <span class="icon-btn" data-action="renamePlayer" data-id="${p.id}" style="border-color:var(--line); color:var(--gold);">✎</span>
-            ${canDelete? `<span class="icon-btn" data-action="deletePlayer" data-id="${p.id}">×</span>` : ""}
+            <span class="icon-btn" data-action="deletePlayerPrompt" data-id="${p.id}">×</span>
           </div>
         </div>`;
       }).join("");
@@ -1651,23 +1652,131 @@
     return html;
   }
 
-  function renderOnlineManualGame(room){
-    const g = room.game;
-    const totals = computeTotals(g);
-    const finishedGames = room.finishedGames || [];
-    const allSessionGames = finishedGames.slice();
-    if(g.finished && !allSessionGames.some(fg=>fg.id===g.id)) allSessionGames.push(g);
+  function renderOnlineGameScreen(){
+    const room = ui.online.room;
+    if(!room) return `<div class="panel"><div class="empty-msg">Betöltés…</div></div>`;
+    if(room.kind==="manual"){
+      const tables = room.tables || (room.game ? {__legacy__: room.game} : {});
+      const tableId = ui.online.activeTableId;
+      if(tableId && tables[tableId]){
+        return renderOnlineManualGame(room, tableId);
+      }
+      return renderOnlineSessionHome(room);
+    }
+    if(!room.game) return `<div class="panel"><div class="empty-msg">Betöltés…</div></div>`;
+    return renderPlayTable(room.game);
+  }
+
+  function renderOnlineSessionHome(room){
+    const tables = room.tables || (room.game ? {__legacy__: room.game} : {});
+    const tableIds = Object.keys(tables);
     let html = `<div class="back-link" data-action="goDashboardKeepRoom">‹ Főoldal</div> <div class="back-link" data-action="leaveOnlineRoom" style="color:var(--wine-bright); margin-left:14px;">Kilépés a szobából</div>`;
 
     if(room.status==="finished"){
       html += `<div class="panel"><div class="panel-title">${escapeHtml(room.name||"Munkamenet")} — lezárva</div></div>`;
-      html += renderSessionStatsPanel(allSessionGames, g.seatingNames);
+      html += renderSessionStatsPanel(getAllSessionGames(room));
+      html += `<button class="btn btn-primary" data-action="leaveOnlineRoom">Vissza a főoldalra</button>`;
+      return html;
+    }
+
+    html += `<div class="panel">
+      <div class="panel-title">${escapeHtml(room.name||"Megosztott munkamenet")}</div>
+      <p class="muted" style="margin:0;">Szobakód: <b>${escapeHtml(room.code)}</b> — ezt add meg a többieknek, ha még valaki csatlakozna.</p>
+    </div>`;
+
+    html += `<div class="panel"><div class="panel-title">Asztalok (${tableIds.length})</div>
+      <p class="muted" style="margin-top:-6px;">Több asztal is futhat egyszerre — koppints egyre a folytatáshoz.</p>`;
+    if(tableIds.length===0){
+      html += `<div class="empty-msg">Még nincs egy asztal sem.</div>`;
+    } else {
+      tableIds.forEach(tid=>{
+        const t = tables[tid];
+        const totals = computeTotals(t);
+        const roundN = t.rounds.length + 1;
+        const statusLabel = t.finished ? "Vége — döntésre vár" : `${roundN}. kör`;
+        html += `<div class="hist-card" data-action="selectTable" data-id="${tid}" style="cursor:pointer;">
+          <div class="hist-top"><span>${escapeHtml(t.label||"Asztal")}</span><span>${statusLabel}</span></div>
+          <div class="hist-players">
+            ${t.seating.map(id=> `${id===t.winnerId?'<b>':''}${escapeHtml((t.seatingNames&&t.seatingNames[id])||playerName(id))} (${totals[id]})${id===t.winnerId?' 🏆</b>':''}${id===t.loserId?' 💩':''}`).join(" · ")}
+          </div>
+        </div>`;
+      });
+    }
+    html += `<button class="btn btn-primary" data-action="goAddTable">+ Új asztal indítása</button>
+    </div>`;
+
+    const allGames = getAllSessionGames(room);
+    if(allGames.length>0){
+      html += renderSessionStatsPanel(allGames);
+      html += renderSessionGamesList(room, null);
+    }
+
+    if(ui.online.isHost){
+      html += `<button class="btn btn-danger" data-action="closeSharedSessionPrompt">Munkamenet lezárása (minden asztal)</button>`;
+    } else {
+      html += `<p class="muted" style="text-align:center;">A munkamenetet csak a host zárhatja le.</p>`;
+    }
+    return html;
+  }
+
+  function renderOnlineAddTable(){
+    const room = ui.online.room;
+    let html = `<div class="back-link" data-action="cancelAddTable">‹ Vissza az asztalokhoz</div>`;
+    if(!room){ html += `<div class="panel"><div class="empty-msg">Betöltés…</div></div>`; return html; }
+    if(state.players.length < 4){
+      html += `<div class="panel"><div class="empty-msg">Legalább 4 játékos kell egy új asztal indításához. Adj hozzá többet a főoldalon.</div></div>`;
+      return html;
+    }
+    html += `
+    <div class="panel">
+      <div class="panel-title">Új asztal ebben a munkamenetben</div>
+      <p class="muted" style="margin-top:-6px;">${escapeHtml(room.name||"Megosztott munkamenet")} — válaszd ki a 4 játékost ehhez az asztalhoz.</p>
+      <div class="chip-grid">
+        ${state.players.map(p=>{
+          const idx = ui.selectedSeating.indexOf(p.id);
+          const selected = idx>-1;
+          return `<div class="chip ${selected?'selected':''}" data-action="toggleSeat" data-id="${p.id}">
+            ${escapeHtml(p.name)}
+            ${selected? `<span class="seat-badge">${idx+1}</span>` : ""}
+          </div>`;
+        }).join("")}
+      </div>
+    </div>
+    ${ui.selectedSeating.length===4 ? `
+    <div class="panel">
+      <div class="panel-title">Ki oszt először?</div>
+      <div class="chip-grid">
+        ${ui.selectedSeating.map((id,idx)=>`<div class="chip ${ui.manualStartingDealerIndex===idx?'selected':''}" data-action="setManualStartingDealer" data-id="${idx}">${escapeHtml(playerName(id))}</div>`).join("")}
+      </div>
+    </div>` : ""}
+    <div class="panel">
+      <div class="panel-title">Céllépés</div>
+      <div class="target-row">
+        <input type="number" id="targetScoreInput" value="${ui.targetScore}" min="10" step="10">
+        <span class="muted">pontnál a program jelzi, hogy vége az asztal partijának</span>
+      </div>
+      <button class="btn btn-primary" data-action="createTableInSession" ${ui.selectedSeating.length===4? "":"disabled style='opacity:0.4;pointer-events:none;'"}>Asztal indítása</button>
+    </div>
+    `;
+    return html;
+  }
+
+  function renderOnlineManualGame(room, tableId){
+    const tables = room.tables || (room.game ? {__legacy__: room.game} : {});
+    const g = tables[tableId];
+    if(!g) return `<div class="panel"><div class="empty-msg">Ez az asztal már nem létezik.</div></div>`;
+    const totals = computeTotals(g);
+    let html = `<div class="back-link" data-action="backToSessionHome">‹ Asztalok</div> <div class="back-link" data-action="leaveOnlineRoom" style="color:var(--wine-bright); margin-left:14px;">Kilépés a szobából</div>`;
+
+    if(room.status==="finished"){
+      html += `<div class="panel"><div class="panel-title">${escapeHtml(room.name||"Munkamenet")} — lezárva</div></div>`;
+      html += renderSessionStatsPanel(getAllSessionGames(room));
       html += `<button class="btn btn-primary" data-action="leaveOnlineRoom">Vissza a főoldalra</button>`;
       return html;
     }
 
     if(g.finished){
-      html += `<div class="panel"><div class="panel-title">Vége ennek a partinak</div>`;
+      html += `<div class="panel"><div class="panel-title">Vége ennek a partinak (${escapeHtml(g.label||"Asztal")})</div>`;
       [...g.seating].sort((a,b)=>totals[a]-totals[b]).forEach(id=>{
         html += `<div class="total-row">
           <span class="total-name">${escapeHtml(playerName(id))}${id===g.winnerId? ' <span class="leader-tag">GYŐZTES</span>':''}${id===g.loserId? ' 💩':''}</span>
@@ -1675,14 +1784,13 @@
         </div>`;
       });
       html += `</div>`;
-      html += renderSessionStatsPanel(allSessionGames, g.seatingNames);
+      html += renderSessionStatsPanel(getAllSessionGames(room));
       html += renderSessionGamesList(room, g);
       html += `<div class="panel">
-        <p class="muted" style="margin-top:0;">A munkamenet ("${escapeHtml(room.name||"Megosztott parti")}") még nyitva van — bárki indíthat egy új partit ugyanezekkel a játékosokkal.</p>
-        <button class="btn btn-primary" data-action="startNewSharedGame">Új parti indítása</button>
-        ${ui.online.isHost
-          ? `<button class="btn btn-danger" data-action="closeSharedSessionPrompt">Munkamenet lezárása</button>`
-          : `<p class="muted" style="text-align:center;">A munkamenetet csak a host zárhatja le.</p>`}
+        <p class="muted" style="margin-top:0;">A munkamenet ("${escapeHtml(room.name||"Megosztott parti")}") még nyitva van.</p>
+        <button class="btn btn-primary" data-action="startNewSharedGame">Új parti ezen az asztalon</button>
+        <button class="btn btn-ghost" data-action="closeTablePrompt">Asztal bezárása</button>
+        <button class="btn btn-ghost" data-action="backToSessionHome">‹ Vissza az asztalokhoz</button>
       </div>`;
       return html;
     }
@@ -1691,7 +1799,7 @@
     const dir = directionForRound(roundN);
     const dealerId = dealerSeatId(g, roundN);
     html += `<div class="panel">
-      <div class="panel-title">${escapeHtml(room.name||"Megosztott parti")}</div>
+      <div class="panel-title">${escapeHtml(room.name||"Megosztott parti")} — ${escapeHtml(g.label||"Asztal")}</div>
       <p class="muted" style="margin:0;">Szobakód: <b>${escapeHtml(room.code)}</b> — ezt add meg a többieknek, ha még valaki csatlakozna.</p>
     </div>`;
     html += `<div class="panel pass-card">
@@ -1778,16 +1886,25 @@
       html += renderRoundEditForm(g);
     }
 
+    const allSessionGames = getAllSessionGames(room);
     if(allSessionGames.length>0){
-      html += renderSessionStatsPanel(allSessionGames, g.seatingNames);
+      html += renderSessionStatsPanel(allSessionGames);
       html += renderSessionGamesList(room, g);
     }
     return html;
   }
 
-  function renderSessionGamesList(room, currentGame){
+  function getAllSessionGames(room){
     const games = (room.finishedGames || []).slice();
-    if(currentGame && currentGame.finished && !games.some(fg=>fg.id===currentGame.id)) games.push(currentGame);
+    const tables = room.tables || (room.game ? {__legacy__: room.game} : {});
+    Object.values(tables).forEach(g=>{
+      if(g && g.finished && !games.some(fg=>fg.id===g.id)) games.push(g);
+    });
+    return games;
+  }
+
+  function renderSessionGamesList(room, currentGame){
+    const games = getAllSessionGames(room);
     if(games.length===0) return "";
     let html = `<div class="panel"><div class="panel-title">Munkamenetben rögzített partik (${games.length})</div>`;
     games.slice().sort((a,b)=>b.finishedAt-a.finishedAt).forEach(gm=>{
@@ -1810,22 +1927,28 @@
   }
 
 
-  function renderSessionStatsPanel(games, seatingNames){
+  function renderSessionStatsPanel(games){
     if(!games || games.length===0) return "";
-    const seatIds = Object.keys(seatingNames||{});
-    let html = `<div class="panel"><div class="panel-title">Munkamenet statisztika (${games.length} lezárt parti)</div>`;
-    seatIds.forEach(seatId=>{
-      const name = seatingNames[seatId];
-      const wins = games.filter(gm=>gm.winnerId===seatId).length;
-      const losses = games.filter(gm=>gm.loserId===seatId).length;
-      const scores = games.map(gm=>{
-        const totals = computeTotals(gm);
-        return totals[seatId] || 0;
+    const statsByName = {};
+    games.forEach(gm=>{
+      const totals = computeTotals(gm);
+      gm.seating.forEach(seatId=>{
+        const name = (gm.seatingNames && gm.seatingNames[seatId]) || playerName(seatId);
+        const key = name.toLowerCase();
+        if(!statsByName[key]) statsByName[key] = { name, played:0, wins:0, losses:0, totalScore:0 };
+        statsByName[key].played++;
+        statsByName[key].totalScore += totals[seatId]||0;
+        if(gm.winnerId===seatId) statsByName[key].wins++;
+        if(gm.loserId===seatId) statsByName[key].losses++;
       });
-      const avg = scores.length ? (scores.reduce((a,b)=>a+b,0)/scores.length) : null;
+    });
+    const rows = Object.values(statsByName).sort((a,b)=> b.wins-a.wins);
+    let html = `<div class="panel"><div class="panel-title">Munkamenet statisztika (${games.length} lezárt parti)</div>`;
+    rows.forEach(r=>{
+      const avg = r.played ? (r.totalScore/r.played) : null;
       html += `<div class="roster-row">
-        <div class="roster-name">${escapeHtml(name)}</div>
-        <div class="roster-stats"><span>J: <b>${games.length}</b></span><span>Gy: <b>${wins}</b></span><span>💩: <b>${losses}</b></span><span>Átl: <b>${avg!==null? avg.toFixed(1):"–"}</b></span></div>
+        <div class="roster-name">${escapeHtml(r.name)}</div>
+        <div class="roster-stats"><span>J: <b>${r.played}</b></span><span>Gy: <b>${r.wins}</b></span><span>💩: <b>${r.losses}</b></span><span>Átl: <b>${avg!==null? avg.toFixed(1):"–"}</b></span></div>
       </div>`;
     });
     html += `</div>`;
@@ -2739,6 +2862,12 @@
       case "startNewSharedGame": startNewSharedGame(); break;
       case "closeSharedSessionPrompt": closeSharedSessionPrompt(); break;
       case "removeGameFromSessionPrompt": removeGameFromSessionPrompt(id); break;
+      case "selectTable": ui.online.activeTableId = id; render(); break;
+      case "backToSessionHome": ui.online.activeTableId = null; render(); break;
+      case "goAddTable": ui.selectedSeating=[]; ui.manualStartingDealerIndex=0; ui.targetScore=100; ui.screen="onlineAddTable"; render(); break;
+      case "cancelAddTable": ui.screen="onlineGame"; render(); break;
+      case "createTableInSession": createTableInSession(); break;
+      case "closeTablePrompt": closeTablePrompt(); break;
       case "goOnlineJoin": ui.online.error=null; ui.online.joinName = state.myPlayerId? playerName(state.myPlayerId) : ui.online.joinName; ui.screen="onlineJoin"; render(); break;
       case "createOnlineRoom": createOnlineRoom(); break;
       case "joinOnlineRoom": joinOnlineRoom(); break;
@@ -2788,7 +2917,7 @@
       case "continueGame": ui.roundInputs={}; ui.moonMode=false; ui.moonPlayer=null; ui.playRevealedSeatId=null; ui.playSelectedCards=[]; ui.screen="activeGame"; render(); break;
       case "resumeGame": state.activeGameId=id; saveState(); ui.roundInputs={}; ui.moonMode=false; ui.moonPlayer=null; ui.playRevealedSeatId=null; ui.playSelectedCards=[]; ui.showWonCards=false; ui.screen="activeGame"; render(); break;
       case "addPlayer": addPlayer(); break;
-      case "deletePlayer": deletePlayer(id); break;
+      case "deletePlayerPrompt": deletePlayerPrompt(id); break;
       case "renamePlayer": renamePlayer(id); break;
       case "toggleSeat": toggleSeat(id); break;
       case "setManualStartingDealer": ui.manualStartingDealerIndex = Number(id); render(); break;
@@ -2903,10 +3032,26 @@
     render();
   }
 
-  function deletePlayer(id){
+  function deletePlayerPrompt(id){
+    const p = state.players.find(p=>p.id===id);
+    if(!p) return;
     const used = state.games.some(g=>g.seating.includes(id));
-    if(used){ showToast("Nem törölhető, mert szerepel egy játékban."); return; }
+    ui.modal = {
+      type: "deletePlayer",
+      playerId: id,
+      title: "Játékos törlése",
+      body: used
+        ? `Törlöd "${p.name}"-t? Mivel szerepel korábbi lezárt játékokban, azokban ezután "?" fog megjelenni a neve helyett. Ez nem vonható vissza.`
+        : `Törlöd "${p.name}"-t? Ez nem vonható vissza.`,
+      confirmLabel: "Törlés",
+      cancelLabel: "Mégse"
+    };
+    render();
+  }
+
+  function deletePlayer(id){
     state.players = state.players.filter(p=>p.id!==id);
+    if(state.myPlayerId===id) state.myPlayerId = null;
     saveState();
     render();
   }
@@ -3023,17 +3168,20 @@
       id: uid(), createdAt: Date.now(), mode: "manual", targetScore: g.targetScore,
       seating: ["p1","p2","p3","p4"], seatingNames,
       startingDealerIndex: g.startingDealerIndex||0,
-      rounds, finished: false, finishedAt: null, winnerId: null, loserId: null
+      rounds, finished: false, finishedAt: null, winnerId: null, loserId: null,
+      label: "1. asztal"
     };
+    const tableId = "t-"+uid();
     const room = {
       code, createdAt: Date.now(), updatedAt: Date.now(), status: "playing", kind: "manual",
-      name: roomName, hostDeviceId: ui.online.deviceId, players: [], finishedGames: [], sessionClosed: false, game: roomGame
+      name: roomName, hostDeviceId: ui.online.deviceId, players: [], tables: { [tableId]: roomGame }, finishedGames: [], sessionClosed: false
     };
     roomDocRef(code).set(room).then(()=>{
       state.games = state.games.filter(x=>x.id!==g.id);
       if(state.activeGameId===g.id) state.activeGameId = null;
       saveState();
       ui.online.isHost = true;
+      ui.online.activeTableId = tableId;
       try{ localStorage.setItem("szar-active-room", JSON.stringify({code, isHost:true})); }catch(e){}
       rememberSharedRoom(code, roomName, "manual");
       listenToRoom(code);
@@ -3043,6 +3191,43 @@
       ui.screen = "onlineGame";
       render();
     }).catch(e=>{ showToast("Nem sikerült megosztani: "+e.message); });
+  }
+
+  function createTableInSession(){
+    if(ui.selectedSeating.length!==4) return;
+    const room = ui.online.room;
+    if(!room) return;
+    const seatingNames = {};
+    ui.selectedSeating.forEach((id,i)=>{ seatingNames["p"+(i+1)] = playerName(id); });
+    const tableId = "t-"+uid();
+    const tables = room.tables || {};
+    const label = `${Object.keys(tables).length+1}. asztal`;
+    const newTable = {
+      id: uid(),
+      createdAt: Date.now(),
+      mode: "manual",
+      targetScore: ui.targetScore || 100,
+      seating: ["p1","p2","p3","p4"],
+      seatingNames,
+      startingDealerIndex: ui.manualStartingDealerIndex || 0,
+      rounds: [],
+      finished: false,
+      finishedAt: null,
+      winnerId: null,
+      loserId: null,
+      label
+    };
+    sessionLevelTransactionUpdate(ui.online.code, function(r){
+      r.tables = r.tables || {};
+      r.tables[tableId] = newTable;
+    }).then(()=>{
+      ui.online.activeTableId = tableId;
+      ui.roundInputs = {};
+      ui.moonMode = false;
+      ui.moonPlayer = null;
+      ui.screen = "onlineGame";
+      render();
+    }).catch(e=>{ showToast(e.message||"Nem sikerült asztalt indítani."); });
   }
 
   function createManualOnlineRoom(){
@@ -3093,6 +3278,8 @@
       };
     }
 
+    const tableId = "t-"+uid();
+    game.label = "1. asztal";
     const room = {
       code,
       createdAt: Date.now(),
@@ -3102,9 +3289,9 @@
       name: roomName,
       hostDeviceId: ui.online.deviceId,
       players: [],
+      tables: { [tableId]: game },
       finishedGames,
-      sessionClosed: false,
-      game
+      sessionClosed: false
     };
     roomDocRef(code).set(room).then(()=>{
       if(activeLocalGame){
@@ -3113,6 +3300,7 @@
         saveState();
       }
       ui.online.isHost = true;
+      ui.online.activeTableId = tableId;
       try{ localStorage.setItem("szar-active-room", JSON.stringify({code, isHost:true})); }catch(e){}
       rememberSharedRoom(code, roomName, "manual");
       listenToRoom(code);
@@ -3137,6 +3325,7 @@
       const room = doc.data();
       if(room.kind==="manual"){
         ui.online.isHost = (room.hostDeviceId===deviceId);
+        ui.online.activeTableId = null;
         try{ localStorage.setItem("szar-active-room", JSON.stringify({code, isHost: ui.online.isHost})); }catch(e){}
         rememberSharedRoom(code, room.name||"Megosztott parti", "manual");
         ui.roundInputs = {};
@@ -3221,6 +3410,7 @@
       }
       const room = doc.data();
       ui.online.isHost = (room.hostDeviceId === ui.online.deviceId);
+      ui.online.activeTableId = null;
       try{ localStorage.setItem("szar-active-room", JSON.stringify({code, isHost: ui.online.isHost})); }catch(e){}
       rememberSharedRoom(code, room.name || "Megosztott szoba", room.kind || "play");
       ui.roundInputs = {};
@@ -3381,7 +3571,7 @@
     roomDocRef(room.code).update({ status:"playing", game, updatedAt: Date.now() }).catch(e=>{ showToast("Nem sikerült elindítani: "+e.message); });
   }
 
-  function onlineTransactionUpdate(code, mutatorFn){
+  function onlineTransactionUpdate(code, mutatorFn, tableId){
     const db = ensureFirebaseInit();
     if(!db) return Promise.reject(new Error("Nincs hálózati kapcsolat."));
     const ref = roomDocRef(code);
@@ -3389,16 +3579,28 @@
       return t.get(ref).then(function(doc){
         if(!doc.exists) throw new Error("A szoba már nem létezik.");
         const room = doc.data();
-        if(!room.game) throw new Error("A játék még nem indult el.");
-        mutatorFn(room.game, room);
+        let game;
+        if(tableId){
+          if(!room.tables || !room.tables[tableId]) throw new Error("Ez az asztal már nem létezik.");
+          game = room.tables[tableId];
+        } else {
+          if(!room.game) throw new Error("A játék még nem indult el.");
+          game = room.game;
+        }
+        mutatorFn(game, room);
         const updates = {
-          game: room.game,
           updatedAt: Date.now(),
           finishedGames: room.finishedGames || [],
           sessionClosed: !!room.sessionClosed,
           status: room.status
         };
-        if(room.kind!=="manual" && room.game.finished) updates.status = "finished";
+        if(tableId){
+          updates.tables = room.tables;
+          if(room.kind!=="manual" && room.tables[tableId] && room.tables[tableId].finished) updates.status = "finished";
+        } else {
+          updates.game = room.game;
+          if(room.kind!=="manual" && room.game.finished) updates.status = "finished";
+        }
         t.update(ref, updates);
       });
     });
@@ -3406,12 +3608,13 @@
 
   function startNewSharedGame(){
     const code = ui.online.code;
+    const tableId = ui.online.activeTableId;
     onlineTransactionUpdate(code, function(game, room){
       if(!game.finished) return;
       room.finishedGames = room.finishedGames || [];
       if(!room.finishedGames.some(fg=>fg.id===game.id)) room.finishedGames.push(game);
       const nextDealerIndex = ((game.startingDealerIndex||0) + game.rounds.length) % 4;
-      room.game = {
+      const newGame = {
         id: uid(),
         createdAt: Date.now(),
         mode: "manual",
@@ -3423,9 +3626,12 @@
         finished: false,
         finishedAt: null,
         winnerId: null,
-        loserId: null
+        loserId: null,
+        label: game.label
       };
-    }).then(()=>{
+      if(tableId && room.tables){ room.tables[tableId] = newGame; }
+      else { room.game = newGame; }
+    }, tableId).then(()=>{
       ui.roundInputs = {};
       ui.moonMode = false;
       ui.moonPlayer = null;
@@ -3445,15 +3651,64 @@
     render();
   }
 
+  function sessionLevelTransactionUpdate(code, mutatorFn){
+    const db = ensureFirebaseInit();
+    if(!db) return Promise.reject(new Error("Nincs hálózati kapcsolat."));
+    const ref = roomDocRef(code);
+    return db.runTransaction(function(t){
+      return t.get(ref).then(function(doc){
+        if(!doc.exists) throw new Error("A szoba már nem létezik.");
+        const room = doc.data();
+        mutatorFn(room);
+        const updates = {
+          updatedAt: Date.now(),
+          finishedGames: room.finishedGames || [],
+          sessionClosed: !!room.sessionClosed,
+          status: room.status,
+          tables: room.tables || {}
+        };
+        t.update(ref, updates);
+      });
+    });
+  }
+
   function closeSharedSession(){
     const code = ui.online.code;
     const deviceId = ui.online.deviceId;
-    onlineTransactionUpdate(code, function(game, room){
+    sessionLevelTransactionUpdate(code, function(room){
       if(room.hostDeviceId!==deviceId) throw new Error("Csak a host zárhatja le a munkamenetet.");
-      room.finishedGames = room.finishedGames || [];
-      if(game.finished && !room.finishedGames.some(fg=>fg.id===game.id)) room.finishedGames.push(game);
+      room.finishedGames = getAllSessionGames(room);
       room.sessionClosed = true;
       room.status = "finished";
+    }).catch(e=>{ showToast(e.message||"Hiba történt."); });
+  }
+
+  function closeTablePrompt(){
+    const tableId = ui.online.activeTableId;
+    if(!tableId) return;
+    ui.modal = {
+      type: "closeTable",
+      tableId,
+      title: "Asztal bezárása",
+      body: "Bezárod ezt az asztalt? A lezárt partik megmaradnak a munkamenet statisztikájában, de ezen az asztalon utána nem lehet tovább játszani.",
+      confirmLabel: "Bezárás",
+      cancelLabel: "Mégse"
+    };
+    render();
+  }
+
+  function closeTable(tableId){
+    const code = ui.online.code;
+    sessionLevelTransactionUpdate(code, function(room){
+      const t = room.tables && room.tables[tableId];
+      if(t && t.finished){
+        room.finishedGames = room.finishedGames || [];
+        if(!room.finishedGames.some(fg=>fg.id===t.id)) room.finishedGames.push(t);
+      }
+      if(room.tables) delete room.tables[tableId];
+    }).then(()=>{
+      ui.online.activeTableId = null;
+      render();
     }).catch(e=>{ showToast(e.message||"Hiba történt."); });
   }
 
@@ -3473,7 +3728,7 @@
   function removeGameFromSession(gameId){
     const code = ui.online.code;
     const deviceId = ui.online.deviceId;
-    onlineTransactionUpdate(code, function(game, room){
+    sessionLevelTransactionUpdate(code, function(room){
       if(room.hostDeviceId!==deviceId) throw new Error("Csak a host távolíthat el partit a munkamenetből.");
       room.finishedGames = (room.finishedGames||[]).filter(fg=>fg.id!==gameId);
     }).catch(e=>{ showToast(e.message||"Hiba történt."); });
@@ -3515,7 +3770,7 @@
         game.winnerId = winner;
         game.loserId = loser;
       }
-    }).then(()=>{
+    }, ui.online.activeTableId).then(()=>{
       ui.roundInputs = {};
       ui.moonMode = false;
       ui.moonPlayer = null;
@@ -3624,21 +3879,11 @@
 
   function maybeSaveOnlineGameLocally(room){
     const game = room.game;
-    if(!game) return;
     if(room.kind==="manual"){
-      const allGames = (room.finishedGames || []).slice();
-      if(game.finished && !allGames.some(g=>g.id===game.id)) allGames.push(game);
+      const allGames = getAllSessionGames(room);
       if(allGames.length===0) return;
       const newOnes = allGames.filter(g=>!state.games.some(sg=>sg.id===g.id));
       if(newOnes.length===0) return;
-      const seatingNames = allGames[allGames.length-1].seatingNames || {};
-      const idMap = {};
-      Object.keys(seatingNames).forEach(seatId=>{
-        const name = seatingNames[seatId] || seatId;
-        let p = state.players.find(p=>p.name.toLowerCase()===name.toLowerCase());
-        if(!p){ p = { id: uid(), name }; state.players.push(p); }
-        idMap[seatId] = p.id;
-      });
       const sessionName = room.name || "Megosztott parti";
       let session = state.sessions.find(s=>s.name.toLowerCase()===sessionName.toLowerCase());
       if(!session){
@@ -3646,6 +3891,14 @@
         state.sessions.push(session);
       }
       newOnes.forEach(g=>{
+        const seatingNames = g.seatingNames || {};
+        const idMap = {};
+        Object.keys(seatingNames).forEach(seatId=>{
+          const name = seatingNames[seatId] || seatId;
+          let p = state.players.find(p=>p.name.toLowerCase()===name.toLowerCase());
+          if(!p){ p = { id: uid(), name }; state.players.push(p); }
+          idMap[seatId] = p.id;
+        });
         const localSeating = g.seating.map(id=>idMap[id] || id);
         const localRounds = g.rounds.map(r=>{
           const scores = {};
@@ -3668,7 +3921,7 @@
       render();
       return;
     }
-    if(!game.finished) return;
+    if(!game || !game.finished) return;
     if(savedOnlineGameIds[game.id]) return;
     savedOnlineGameIds[game.id] = true;
     if(state.games.some(g=>g.id===game.id)) return;
@@ -3692,13 +3945,13 @@
   }
 
   function startEditRound(roundIndex){
-    const g = ui.screen==="onlineGame" ? (ui.online.room && ui.online.room.game)
+    const g = ui.screen==="onlineGame" ? (ui.online.room && ui.online.activeTableId && ((ui.online.room.tables||{})[ui.online.activeTableId] || (ui.online.room.game)))
       : ui.screen==="gameDetail" ? state.games.find(g=>g.id===ui.historyOpenId)
       : activeGame();
     if(!g) return;
     const r = g.rounds[roundIndex];
     if(!r) return;
-    ui.editingRound = { gameId: g.id, roundIndex, online: ui.screen==="onlineGame" };
+    ui.editingRound = { gameId: g.id, roundIndex, online: ui.screen==="onlineGame", tableId: ui.online.activeTableId };
     ui.editRoundInputs = {};
     g.seating.forEach(id=>{ ui.editRoundInputs[id] = String(r.scores[id]||0); });
     ui.editRoundMoonMode = !!r.moonShooter;
@@ -3750,7 +4003,8 @@
   }
 
   function saveEditRoundOnline(){
-    const g = ui.online.room && ui.online.room.game;
+    const tableId = ui.editingRound && ui.editingRound.tableId;
+    const g = ui.online.room && ((ui.online.room.tables||{})[tableId] || ui.online.room.game);
     if(!g || !ui.editingRound) return;
     let scores = {};
     let moonShooter = null;
@@ -3774,16 +4028,17 @@
         confirmLabel: "Mentés mégis",
         cancelLabel: "Vissza szerkeszteni",
         roundIndex,
+        tableId,
         pendingScores: scores,
         pendingMoonShooter: moonShooter
       };
       render();
       return;
     }
-    applyRoundEditOnline(roundIndex, scores, moonShooter);
+    applyRoundEditOnline(roundIndex, scores, moonShooter, tableId);
   }
 
-  function applyRoundEditOnline(roundIndex, scores, moonShooter){
+  function applyRoundEditOnline(roundIndex, scores, moonShooter, tableId){
     const code = ui.online.code;
     onlineTransactionUpdate(code, function(game){
       if(!game.rounds[roundIndex]) return;
@@ -3797,7 +4052,7 @@
         game.winnerId = winner;
         game.loserId = loser;
       }
-    }).then(()=>{
+    }, tableId).then(()=>{
       ui.editingRound = null;
       render();
     }).catch(e=>{ showToast(e.message||"Hiba történt."); });
@@ -4115,7 +4370,7 @@
     } else if(m && m.type==="editRound"){
       applyRoundEdit(m.gameId, m.roundIndex, m.pendingScores, m.pendingMoonShooter);
     } else if(m && m.type==="editRoundOnline"){
-      applyRoundEditOnline(m.roundIndex, m.pendingScores, m.pendingMoonShooter);
+      applyRoundEditOnline(m.roundIndex, m.pendingScores, m.pendingMoonShooter, m.tableId);
     } else if(m && m.type==="deleteGame"){
       state.games = state.games.filter(g=>g.id!==m.gameId);
       if(state.activeGameId===m.gameId) state.activeGameId = null;
@@ -4124,6 +4379,8 @@
       render();
     } else if(m && m.type==="closeSharedSession"){
       closeSharedSession();
+    } else if(m && m.type==="closeTable"){
+      closeTable(m.tableId);
     } else if(m && m.type==="removeGameFromSession"){
       removeGameFromSession(m.gameId);
     } else if(m && m.type==="removeGameFromLocalSession"){
@@ -4133,6 +4390,8 @@
     } else if(m && m.type==="forgetSharedRoom"){
       forgetSharedRoom(m.code);
       render();
+    } else if(m && m.type==="deletePlayer"){
+      deletePlayer(m.playerId);
     }
   }
 

@@ -212,6 +212,27 @@
   }
   .roster-stats > span:not(.icon-btn){ display:inline-block; min-width:46px; }
   .roster-stats b{ color:var(--gold-bright); }
+  .roster-row-v2{
+    padding:9px 0;
+    border-bottom:1px solid rgba(200,163,91,0.15);
+  }
+  .roster-row-v2:last-child{ border-bottom:none; }
+  .roster-row-v2-top{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    margin-bottom:5px;
+  }
+  .roster-row-v2-actions{
+    display:flex;
+    gap:8px;
+    flex-shrink:0;
+  }
+  .roster-row-v2 .roster-stats{
+    font-family: monospace;
+    font-size:13px;
+  }
   .add-player-row{
     display:flex;
     gap:8px;
@@ -1493,15 +1514,19 @@
         const s = computeStats(p.id);
         const isMe = p.id===state.myPlayerId;
         return `
-        <div class="roster-row">
-          <div class="roster-name">${escapeHtml(p.name)}${isMe? ' <span class="muted">(te)</span>':''}</div>
+        <div class="roster-row-v2">
+          <div class="roster-row-v2-top">
+            <div class="roster-name">${escapeHtml(p.name)}${isMe? ' <span class="muted">(te)</span>':''}</div>
+            <div class="roster-row-v2-actions">
+              <span class="icon-btn" data-action="renamePlayer" data-id="${p.id}" style="border-color:var(--line); color:var(--gold);">✎</span>
+              <span class="icon-btn" data-action="deletePlayerPrompt" data-id="${p.id}">×</span>
+            </div>
+          </div>
           <div class="roster-stats">
             <span>J: <b>${s.gamesPlayed}</b></span>
             <span>Gy: <b>${s.wins}</b></span>
             <span>💩: <b>${s.losses}</b></span>
             <span>Átl: <b>${s.avg!==null? s.avg.toFixed(1):"–"}</b></span>
-            <span class="icon-btn" data-action="renamePlayer" data-id="${p.id}" style="border-color:var(--line); color:var(--gold);">✎</span>
-            <span class="icon-btn" data-action="deletePlayerPrompt" data-id="${p.id}">×</span>
           </div>
         </div>`;
       }).join("");

@@ -752,6 +752,8 @@
     showWonCards: false,
     editingRound: null,
     editingGameNames: null,
+    newTableSeatOrder: [],
+    newTableDealerIndex: 0,
     editRoundInputs: {},
     editRoundMoonMode: false,
     editRoundMoonPlayer: null,
@@ -1345,6 +1347,7 @@
     else if(ui.screen==="onlineCreate") html += renderOnlineCreate();
     else if(ui.screen==="onlineManualSetup") html += renderOnlineManualSetup();
     else if(ui.screen==="onlineAddTable") html += renderOnlineAddTable();
+    else if(ui.screen==="onlineNewGameSetup") html += renderOnlineNewGameSetup();
     else if(ui.screen==="onlineJoin") html += renderOnlineJoin();
     else if(ui.screen==="onlineLobby") html += renderOnlineLobby();
     else if(ui.screen==="onlineGame") html += renderOnlineGameScreen();
@@ -1722,6 +1725,43 @@
     return html;
   }
 
+  function renderOnlineNewGameSetup(){
+    const room = ui.online.room;
+    const tableId = ui.online.activeTableId;
+    let html = `<div class="back-link" data-action="cancelNewGameSetup">‹ Mégse</div>`;
+    if(!room || !tableId){ html += `<div class="panel"><div class="empty-msg">Betöltés…</div></div>`; return html; }
+    const tables = room.tables || (room.game ? {__legacy__: room.game} : {});
+    const t = tables[tableId];
+    if(!t){ html += `<div class="panel"><div class="empty-msg">Ez az asztal már nem létezik.</div></div>`; return html; }
+    html += `
+    <div class="panel">
+      <div class="panel-title">Új parti — ${escapeHtml(t.label||"Asztal")}</div>
+      <p class="muted" style="margin-top:-6px;">Állítsd be az ülésrendet (koppintás sorrendje adja meg) és azt, ki oszt először.</p>
+      <div class="chip-grid">
+        ${t.seating.map(pid=>{
+          const idx = ui.newTableSeatOrder.indexOf(pid);
+          const selected = idx>-1;
+          return `<div class="chip ${selected?'selected':''}" data-action="toggleNewTableSeat" data-id="${pid}">
+            ${escapeHtml(t.seatingNames[pid]||pid)}
+            ${selected? `<span class="seat-badge">${idx+1}</span>` : ""}
+          </div>`;
+        }).join("")}
+      </div>
+    </div>
+    ${ui.newTableSeatOrder.length===4 ? `
+    <div class="panel">
+      <div class="panel-title">Ki oszt először?</div>
+      <div class="chip-grid">
+        ${ui.newTableSeatOrder.map((pid,idx)=>`<div class="chip ${ui.newTableDealerIndex===idx?'selected':''}" data-action="setNewTableDealer" data-id="${idx}">${escapeHtml(t.seatingNames[pid]||pid)}</div>`).join("")}
+      </div>
+    </div>` : ""}
+    <div class="panel">
+      <button class="btn btn-primary" data-action="confirmStartNewSharedGame" ${ui.newTableSeatOrder.length===4? "":"disabled style='opacity:0.4;pointer-events:none;'"}>Parti indítása</button>
+    </div>
+    `;
+    return html;
+  }
+
   function renderOnlineAddTable(){
     const room = ui.online.room;
     let html = `<div class="back-link" data-action="cancelAddTable">‹ Vissza az asztalokhoz</div>`;
@@ -1791,7 +1831,7 @@
       html += renderSessionGamesList(room, g);
       html += `<div class="panel">
         <p class="muted" style="margin-top:0;">A munkamenet ("${escapeHtml(room.name||"Megosztott parti")}") még nyitva van.</p>
-        <button class="btn btn-primary" data-action="startNewSharedGame">Új parti ezen az asztalon</button>
+        <button class="btn btn-primary" data-action="goNewSharedGameSetup">Új parti ezen az asztalon</button>
         <button class="btn btn-ghost" data-action="closeTablePrompt">Asztal bezárása</button>
         <button class="btn btn-ghost" data-action="backToSessionHome">‹ Vissza az asztalokhoz</button>
       </div>`;
@@ -1866,7 +1906,9 @@
       }).join("");
       html += `<div class="sum-note ${sum!==19?'warn':''}">Beírt pontok: ${sum} · Még kiosztható: ${Math.max(0,19-sum)} (egy teljes kör összesen 19 pontot ér)</div>`;
     }
-    html += `<button class="btn btn-primary" data-action="submitOnlineManualRound">Kör mentése</button></div>`;
+    html += `<button class="btn btn-primary" data-action="submitOnlineManualRound">Kör mentése</button>
+      <button class="btn btn-ghost" data-action="closeTablePrompt" style="color:var(--wine-bright);">Parti megszakítása / asztal törlése</button>
+    </div>`;
 
     html += seatingDiagram(g, dir, dealerId);
 
@@ -2902,6 +2944,11 @@
       case "createManualOnlineRoom": createManualOnlineRoom(); break;
       case "submitOnlineManualRound": submitOnlineManualRound(); break;
       case "startNewSharedGame": startNewSharedGame(); break;
+      case "goNewSharedGameSetup": goNewSharedGameSetup(); break;
+      case "cancelNewGameSetup": ui.screen="onlineGame"; render(); break;
+      case "toggleNewTableSeat": toggleNewTableSeat(id); break;
+      case "setNewTableDealer": ui.newTableDealerIndex = Number(id); render(); break;
+      case "confirmStartNewSharedGame": confirmStartNewSharedGame(); break;
       case "closeSharedSessionPrompt": closeSharedSessionPrompt(); break;
       case "removeGameFromSessionPrompt": removeGameFromSessionPrompt(id); break;
       case "fixGameNamesPrompt": fixGameNamesPrompt(id); break;
@@ -3711,6 +3758,73 @@
     });
   }
 
+  function goNewSharedGameSetup(){
+    const room = ui.online.room;
+    const tableId = ui.online.activeTableId;
+    if(!room || !tableId) return;
+    const tables = room.tables || (room.game ? {__legacy__: room.game} : {});
+    const t = tables[tableId];
+    if(!t) return;
+    ui.newTableSeatOrder = t.seating.slice();
+    ui.newTableDealerIndex = 0;
+    ui.screen = "onlineNewGameSetup";
+    render();
+  }
+
+  function toggleNewTableSeat(pid){
+    const idx = ui.newTableSeatOrder.indexOf(pid);
+    if(idx>-1){ ui.newTableSeatOrder.splice(idx,1); }
+    else { ui.newTableSeatOrder.push(pid); }
+    ui.newTableDealerIndex = 0;
+    render();
+  }
+
+  function confirmStartNewSharedGame(){
+    const room = ui.online.room;
+    const tableId = ui.online.activeTableId;
+    if(!room || !tableId) return;
+    const tables = room.tables || (room.game ? {__legacy__: room.game} : {});
+    const t = tables[tableId];
+    if(!t) return;
+    if(ui.newTableSeatOrder.length!==4){ showToast("Mind a 4 játékosnak sorrendben kell lennie."); return; }
+    const seatOrder = ui.newTableSeatOrder.slice();
+    const dealerIndex = ui.newTableDealerIndex || 0;
+    const code = ui.online.code;
+    onlineTransactionUpdate(code, function(game, room2){
+      if(!game.finished) return;
+      room2.finishedGames = room2.finishedGames || [];
+      if(!room2.finishedGames.some(fg=>fg.id===game.id)) room2.finishedGames.push(game);
+      const newGame = {
+        id: uid(),
+        createdAt: Date.now(),
+        mode: "manual",
+        targetScore: game.targetScore,
+        seating: seatOrder,
+        seatingNames: Object.assign({}, game.seatingNames),
+        startingDealerIndex: dealerIndex,
+        rounds: [],
+        finished: false,
+        finishedAt: null,
+        winnerId: null,
+        loserId: null,
+        label: game.label || "Asztal"
+      };
+      if(tableId && room2.tables){ room2.tables[tableId] = newGame; }
+      else { room2.game = newGame; }
+    }, tableId).then(()=>{
+      ui.roundInputs = {};
+      ui.moonMode = false;
+      ui.moonPlayer = null;
+      ui.screen = "onlineGame";
+      render();
+    }).catch(e=>{
+      showToast((e.message||"Hiba történt.")+" Próbáld újra az asztal-listából.");
+      ui.online.activeTableId = null;
+      ui.screen = "onlineGame";
+      render();
+    });
+  }
+
   function startNewSharedGame(){
     const code = ui.online.code;
     const tableId = ui.online.activeTableId;
@@ -3795,12 +3909,18 @@
   function closeTablePrompt(){
     const tableId = ui.online.activeTableId;
     if(!tableId) return;
+    const room = ui.online.room;
+    const tables = room && (room.tables || (room.game ? {__legacy__: room.game} : {}));
+    const t = tables && tables[tableId];
+    const isFinished = t && t.finished;
     ui.modal = {
       type: "closeTable",
       tableId,
-      title: "Asztal bezárása",
-      body: "Bezárod ezt az asztalt? A lezárt partik megmaradnak a munkamenet statisztikájában, de ezen az asztalon utána nem lehet tovább játszani.",
-      confirmLabel: "Bezárás",
+      title: isFinished ? "Asztal bezárása" : "Parti megszakítása / asztal törlése",
+      body: isFinished
+        ? "Bezárod ezt az asztalt? A lezárt partik megmaradnak a munkamenet statisztikájában, de ezen az asztalon utána nem lehet tovább játszani."
+        : "Megszakítod ezt a partit? Az eddig beírt körök elvesznek, és NEM kerülnek be a munkamenet statisztikájába. Ez nem vonható vissza.",
+      confirmLabel: isFinished ? "Bezárás" : "Megszakítás",
       cancelLabel: "Mégse"
     };
     render();

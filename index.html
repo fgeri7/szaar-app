@@ -3425,7 +3425,11 @@
         return;
       }
       const knownIds = new Set(getAllSessionGames(room).map(g=>g.id));
-      const localOnly = state.games.filter(g=>g.finished && g.sessionId===session.id && !knownIds.has(g.id));
+      const localOnly = state.games.filter(g=>{
+        if(!g.finished || g.sessionId!==session.id || knownIds.has(g.id)) return false;
+        if(g.sharedRoomCode) return g.sharedRoomCode===code;
+        return true; // régebbi, címke nélküli parti — a névegyeztetés (lent) úgyis kiszűri, ha a játékosok nem egyeznek
+      });
       if(localOnly.length===0){
         showToast(pulledIn>0 ? `${pulledIn} új parti szinkronizálva.` : "Nincs új parti, minden szinkronban van.");
         return;
@@ -3979,7 +3983,7 @@
           id: g.id, createdAt: g.createdAt, targetScore: g.targetScore,
           startingDealerIndex: g.startingDealerIndex||0,
           seating: localSeating, rounds: localRounds, finished: true, finishedAt: g.finishedAt||Date.now(),
-          winnerId: winner, loserId: loser, sessionId: session.id
+          winnerId: winner, loserId: loser, sessionId: session.id, sharedRoomCode: room.code
         });
       });
       saveState();

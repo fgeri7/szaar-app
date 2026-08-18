@@ -751,6 +751,7 @@
     playRevealedSeatId: null,
     showWonCards: false,
     editingRound: null,
+    editingGameNames: null,
     editRoundInputs: {},
     editRoundMoonMode: false,
     editRoundMoonPlayer: null,
@@ -1917,14 +1918,40 @@
       html += `<div class="hist-card" style="cursor:default;">
         <div class="hist-top">
           <span>${dateStr} · ${gm.rounds.length} kör</span>
-          ${ui.online.isHost ? `<span class="icon-btn" data-action="removeGameFromSessionPrompt" data-id="${gm.id}">×</span>` : ""}
+          <span>
+            ${ui.online.isHost ? `<span class="icon-btn" data-action="fixGameNamesPrompt" data-id="${gm.id}" style="border-color:var(--line); color:var(--gold);">✎</span>` : ""}
+            ${ui.online.isHost ? `<span class="icon-btn" data-action="removeGameFromSessionPrompt" data-id="${gm.id}">×</span>` : ""}
+          </span>
         </div>
         <div class="hist-players">
           ${gm.seating.map(id=> `${id===gm.winnerId?'<b>':''}${escapeHtml((gm.seatingNames&&gm.seatingNames[id])||playerName(id))} (${totals[id]})${id===gm.winnerId?' 🏆</b>':''}${id===gm.loserId?' 💩':''}`).join(" · ")}
         </div>
+        ${renderFixGameNamesForm(gm)}
       </div>`;
     });
     html += `</div>`;
+    return html;
+  }
+
+  function renderFixGameNamesForm(gm){
+    if(!ui.editingGameNames || ui.editingGameNames.gameId!==gm.id) return "";
+    const values = ui.editingGameNames.values;
+    let html = `<div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--line);">
+      <p class="muted" style="margin:0 0 8px;">Add meg, valójában ki tartozik az egyes eredményekhez (ha a nevek összekeveredtek):</p>`;
+    gm.seating.forEach(id=>{
+      const totals_ = {};
+      gm.seating.forEach(sid=>{ totals_[sid]=0; });
+      gm.rounds.forEach(r=> gm.seating.forEach(sid=>{ totals_[sid]+=(r.scores[sid]||0); }));
+      html += `<div class="round-input-row">
+        <span class="rname">Eredmény: ${totals_[id]}</span>
+        <input type="text" class="fix-name-input" data-id="${id}" value="${escapeHtml(values[id]!==undefined? values[id] : ((gm.seatingNames&&gm.seatingNames[id])||""))}" placeholder="Név">
+      </div>`;
+    });
+    html += `<div class="btn-row" style="margin-top:10px;">
+      <button class="btn btn-ghost" data-action="cancelFixGameNames">Mégse</button>
+      <button class="btn btn-primary" data-action="saveFixGameNames">Mentés</button>
+    </div>
+    </div>`;
     return html;
   }
 
@@ -2813,6 +2840,11 @@
     document.querySelectorAll(".edit-round-input").forEach(inp=>{
       inp.addEventListener("input", e=>{ ui.editRoundInputs[e.target.dataset.id] = e.target.value; });
     });
+    document.querySelectorAll(".fix-name-input").forEach(inp=>{
+      inp.addEventListener("input", e=>{
+        if(ui.editingGameNames) ui.editingGameNames.values[e.target.dataset.id] = e.target.value;
+      });
+    });
     const editMoonCb = document.getElementById("editMoonCheckbox");
     if(editMoonCb){
       editMoonCb.addEventListener("change", e=>{ ui.editRoundMoonMode = e.target.checked; ui.editRoundMoonPlayer=null; render(); });
@@ -2872,6 +2904,9 @@
       case "startNewSharedGame": startNewSharedGame(); break;
       case "closeSharedSessionPrompt": closeSharedSessionPrompt(); break;
       case "removeGameFromSessionPrompt": removeGameFromSessionPrompt(id); break;
+      case "fixGameNamesPrompt": fixGameNamesPrompt(id); break;
+      case "cancelFixGameNames": cancelFixGameNames(); break;
+      case "saveFixGameNames": saveFixGameNames(); break;
       case "selectTable": ui.online.activeTableId = id; render(); break;
       case "backToSessionHome": ui.online.activeTableId = null; render(); break;
       case "goAddTable": ui.selectedSeating=[]; ui.manualStartingDealerIndex=0; ui.targetScore=100; ui.screen="onlineAddTable"; render(); break;
@@ -3417,7 +3452,12 @@
       const before = state.games.length;
       maybeSaveOnlineGameLocally(room);
       const pulledIn = state.games.length - before;
+      showToast(pulledIn>0 ? `${pulledIn} új parti szinkronizálva.` : "Nincs új parti, minden szinkronban van.");
+      return;
 
+      /* A "helyi -> szoba" visszaírási irány ideiglenesen KIKAPCSOLVA egy gyanús
+         névösszekeveredési hiba miatt, amíg biztosan ki nem derül a pontos ok.
+         A kód lent marad referenciának, de jelenleg nem fut le. */
       const sessionName = room.name || "Megosztott parti";
       const session = state.sessions.find(s=>s.name.toLowerCase()===sessionName.toLowerCase());
       if(!session){
@@ -3777,6 +3817,51 @@
       if(room.tables) delete room.tables[tableId];
     }).then(()=>{
       ui.online.activeTableId = null;
+      render();
+    }).catch(e=>{ showToast(e.message||"Hiba történt."); });
+  }
+
+  function fixGameNamesPrompt(gameId){
+    if(!ui.online.isHost){ showToast("Csak a host javíthatja a rögzített nevek hozzárendelését."); return; }
+    ui.editingGameNames = { gameId, values: {} };
+    render();
+  }
+
+  function cancelFixGameNames(){
+    ui.editingGameNames = null;
+    render();
+  }
+
+  function saveFixGameNames(){
+    if(!ui.editingGameNames) return;
+    const gameId = ui.editingGameNames.gameId;
+    const values = ui.editingGameNames.values;
+    const code = ui.online.code;
+    sessionLevelTransactionUpdate(code, function(room){
+      const games = getAllSessionGames(room);
+      const target = games.find(g=>g.id===gameId);
+      if(!target) throw new Error("Ez a parti már nem található.");
+      const newSeatingNames = Object.assign({}, target.seatingNames);
+      target.seating.forEach(id=>{
+        if(values[id]!==undefined && values[id].trim()!==""){ newSeatingNames[id] = values[id].trim(); }
+      });
+      // frissítjük mindenütt, ahol ez a game szerepel (finishedGames archívum és/vagy élő asztal)
+      if(room.finishedGames){
+        room.finishedGames = room.finishedGames.map(g=> g.id===gameId ? Object.assign({}, g, { seatingNames: newSeatingNames }) : g);
+      }
+      if(room.tables){
+        Object.keys(room.tables).forEach(tid=>{
+          if(room.tables[tid] && room.tables[tid].id===gameId){
+            room.tables[tid] = Object.assign({}, room.tables[tid], { seatingNames: newSeatingNames });
+          }
+        });
+      }
+      if(room.game && room.game.id===gameId){
+        room.game = Object.assign({}, room.game, { seatingNames: newSeatingNames });
+      }
+    }).then(()=>{
+      ui.editingGameNames = null;
+      showToast("Nevek javítva.");
       render();
     }).catch(e=>{ showToast(e.message||"Hiba történt."); });
   }

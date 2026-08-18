@@ -3156,7 +3156,8 @@
       startingDealerIndex: g.startingDealerIndex||0,
       rounds, finished: !!g.finished, finishedAt: g.finishedAt||null,
       winnerId: g.winnerId ? (seatMap[g.winnerId]||null) : null,
-      loserId: g.loserId ? (seatMap[g.loserId]||null) : null
+      loserId: g.loserId ? (seatMap[g.loserId]||null) : null,
+      label: "Asztal"
     };
   }
 
@@ -3415,8 +3416,46 @@
       const room = doc.data();
       const before = state.games.length;
       maybeSaveOnlineGameLocally(room);
-      const after = state.games.length;
-      showToast(after>before ? `${after-before} új parti szinkronizálva.` : "Nincs új parti, minden szinkronban van.");
+      const pulledIn = state.games.length - before;
+
+      const sessionName = room.name || "Megosztott parti";
+      const session = state.sessions.find(s=>s.name.toLowerCase()===sessionName.toLowerCase());
+      if(!session){
+        showToast(pulledIn>0 ? `${pulledIn} új parti szinkronizálva.` : "Nincs új parti, minden szinkronban van.");
+        return;
+      }
+      const knownIds = new Set(getAllSessionGames(room).map(g=>g.id));
+      const localOnly = state.games.filter(g=>g.finished && g.sessionId===session.id && !knownIds.has(g.id));
+      if(localOnly.length===0){
+        showToast(pulledIn>0 ? `${pulledIn} új parti szinkronizálva.` : "Nincs új parti, minden szinkronban van.");
+        return;
+      }
+      const tables = room.tables || (room.game ? {__legacy__: room.game} : {});
+      const referenceTable = Object.values(tables)[0] || getAllSessionGames(room)[0];
+      if(!referenceTable || !referenceTable.seatingNames){
+        showToast(`${localOnly.length} helyi parti hiányzik a szobából, de nem találtam referencia-asztalt a visszaíráshoz.`);
+        return;
+      }
+      const seatingNames = referenceTable.seatingNames;
+      const seatNameToId = {};
+      Object.keys(seatingNames).forEach(pid=>{ seatNameToId[seatingNames[pid].toLowerCase()] = pid; });
+      const convertedBack = [];
+      localOnly.forEach(g=>{
+        const converted = buildRoomGameFromLocal(g, seatNameToId);
+        if(converted){ converted.seatingNames = seatingNames; convertedBack.push(converted); }
+      });
+      if(convertedBack.length===0){
+        showToast(`${localOnly.length} helyi parti hiányzik a szobából, de a játékosnevek nem egyeznek a szoba jelenlegi asztalával, ezért nem tudtam visszaírni.`);
+        return;
+      }
+      sessionLevelTransactionUpdate(code, function(r){
+        r.finishedGames = r.finishedGames || [];
+        convertedBack.forEach(cg=>{
+          if(!r.finishedGames.some(fg=>fg.id===cg.id)) r.finishedGames.push(cg);
+        });
+      }).then(()=>{
+        showToast(`${convertedBack.length} helyi parti visszaírva a szobába` + (pulledIn>0? `, ${pulledIn} új parti szinkronizálva helyben.` : "."));
+      }).catch(e=>{ showToast("Hiba a visszaírásnál: "+(e.message||"")); });
     }).catch(function(e){ showToast("Nem sikerült szinkronizálni: "+(e.message||"")); });
   }
 
@@ -3649,7 +3688,7 @@
         finishedAt: null,
         winnerId: null,
         loserId: null,
-        label: game.label
+        label: game.label || "Asztal"
       };
       if(tableId && room.tables){ room.tables[tableId] = newGame; }
       else { room.game = newGame; }

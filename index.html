@@ -184,8 +184,10 @@
   /* ---------- Roster ---------- */
   .roster-row{
     display:flex;
-    align-items:center;
+    flex-wrap:wrap;
+    align-items:baseline;
     justify-content:space-between;
+    gap:6px 16px;
     padding:9px 0;
     border-bottom:1px solid rgba(200,163,91,0.15);
     font-family: monospace;
@@ -197,13 +199,18 @@
     font-weight:600;
     font-size:14.5px;
     color:var(--cream);
+    flex:1 1 auto;
+    min-width:70px;
   }
   .roster-stats{
     display:flex;
-    gap:14px;
+    flex-wrap:wrap;
+    gap:5px 14px;
     color:rgba(239,230,211,0.7);
     font-size:12px;
+    align-items:center;
   }
+  .roster-stats > span:not(.icon-btn){ display:inline-block; min-width:46px; }
   .roster-stats b{ color:var(--gold-bright); }
   .add-player-row{
     display:flex;
@@ -754,6 +761,8 @@
     editingGameNames: null,
     newTableSeatOrder: [],
     newTableDealerIndex: 0,
+    sessionGamesExpanded: true,
+    roomGamesExpanded: true,
     editRoundInputs: {},
     editRoundMoonMode: false,
     editRoundMoonPlayer: null,
@@ -1951,26 +1960,28 @@
   function renderSessionGamesList(room, currentGame){
     const games = getAllSessionGames(room);
     if(games.length===0) return "";
-    let html = `<div class="panel"><div class="panel-title">Munkamenetben rögzített partik (${games.length})</div>`;
-    games.slice().sort((a,b)=>b.finishedAt-a.finishedAt).forEach(gm=>{
-      const totals = {};
-      gm.seating.forEach(id=>{ totals[id]=0; });
-      gm.rounds.forEach(r=> gm.seating.forEach(id=>{ totals[id]+=(r.scores[id]||0); }));
-      const dateStr = new Date(gm.finishedAt).toLocaleDateString("hu-HU");
-      html += `<div class="hist-card" style="cursor:default;">
-        <div class="hist-top">
-          <span>${dateStr} · ${gm.rounds.length} kör</span>
-          <span>
-            ${ui.online.isHost ? `<span class="icon-btn" data-action="fixGameNamesPrompt" data-id="${gm.id}" style="border-color:var(--line); color:var(--gold);">✎</span>` : ""}
-            ${ui.online.isHost ? `<span class="icon-btn" data-action="removeGameFromSessionPrompt" data-id="${gm.id}">×</span>` : ""}
-          </span>
-        </div>
-        <div class="hist-players">
-          ${gm.seating.map(id=> `${id===gm.winnerId?'<b>':''}${escapeHtml((gm.seatingNames&&gm.seatingNames[id])||playerName(id))} (${totals[id]})${id===gm.winnerId?' 🏆</b>':''}${id===gm.loserId?' 💩':''}`).join(" · ")}
-        </div>
-        ${renderFixGameNamesForm(gm)}
-      </div>`;
-    });
+    let html = `<div class="panel"><div class="panel-title" data-action="toggleRoomGamesExpanded" style="cursor:pointer;">Munkamenetben rögzített partik (${games.length}) ${ui.roomGamesExpanded? "▾":"▸"}</div>`;
+    if(ui.roomGamesExpanded){
+      games.slice().sort((a,b)=>b.finishedAt-a.finishedAt).forEach(gm=>{
+        const totals = {};
+        gm.seating.forEach(id=>{ totals[id]=0; });
+        gm.rounds.forEach(r=> gm.seating.forEach(id=>{ totals[id]+=(r.scores[id]||0); }));
+        const dateStr = new Date(gm.finishedAt).toLocaleDateString("hu-HU");
+        html += `<div class="hist-card" style="cursor:default;">
+          <div class="hist-top">
+            <span>${dateStr} · ${gm.rounds.length} kör</span>
+            <span>
+              ${ui.online.isHost ? `<span class="icon-btn" data-action="fixGameNamesPrompt" data-id="${gm.id}" style="border-color:var(--line); color:var(--gold);">✎</span>` : ""}
+              ${ui.online.isHost ? `<span class="icon-btn" data-action="removeGameFromSessionPrompt" data-id="${gm.id}">×</span>` : ""}
+            </span>
+          </div>
+          <div class="hist-players">
+            ${gm.seating.map(id=> `${id===gm.winnerId?'<b>':''}${escapeHtml((gm.seatingNames&&gm.seatingNames[id])||playerName(id))} (${totals[id]})${id===gm.winnerId?' 🏆</b>':''}${id===gm.loserId?' 💩':''}`).join(" · ")}
+          </div>
+          ${renderFixGameNamesForm(gm)}
+        </div>`;
+      });
+    }
     html += `</div>`;
     return html;
   }
@@ -2655,13 +2666,6 @@
       <div class="panel-title">${escapeHtml(s.name)}</div>
       <p class="muted" style="margin-top:-6px;">${s.closed ? `Lezárva: ${new Date(s.closedAt).toLocaleDateString("hu-HU")}` : "Aktív munkamenet"}</p>
     </div>`;
-    const linkedRoom = (state.knownSharedRooms||[]).find(r=> r.name && r.name.toLowerCase()===s.name.toLowerCase());
-    if(linkedRoom){
-      html += `<div class="panel">
-        <p class="muted" style="margin:0 0 10px;">Ez a munkamenet egy megosztott szobához kapcsolódik (kód: ${escapeHtml(linkedRoom.code)}). Ha úgy érzed, hiányzik belőle egy lejátszott parti, próbáld meg újraszinkronizálni.</p>
-        <button class="btn btn-ghost" data-action="resyncSharedRoom" data-id="${linkedRoom.code}">Statisztika szinkronizálása</button>
-      </div>`;
-    }
     const sessionGames = state.games.filter(g=>g.finished && g.sessionId===s.id);
     const playerIds = Array.from(new Set(sessionGames.flatMap(g=>g.seating))).filter(id=> state.players.some(p=>p.id===id));
     html += `<div class="panel"><div class="panel-title">Statisztika</div>`;
@@ -2682,23 +2686,32 @@
       });
     }
     html += `</div>`;
-    html += `<div class="panel"><div class="panel-title">Játékok</div>`;
-    if(sessionGames.length===0){
-      html += `<div class="empty-msg">Nincs még játék ebben a munkamenetben.</div>`;
-    } else {
-      html += sessionGames.sort((a,b)=>b.finishedAt-a.finishedAt).map(g=>{
-        const totals = computeTotals(g);
-        const dateStr = new Date(g.finishedAt).toLocaleDateString("hu-HU");
-        return `<div class="hist-card">
-          <div class="hist-top">
-            <span data-action="openGame" data-id="${g.id}" style="cursor:pointer;">${dateStr} · ${g.rounds.length} kör</span>
-            <span class="icon-btn" data-action="removeGameFromLocalSessionPrompt" data-id="${g.id}">×</span>
-          </div>
-          <div class="hist-players" data-action="openGame" data-id="${g.id}" style="cursor:pointer;">
-            ${g.seating.map(id=> `${id===g.winnerId?'<b>':''}${escapeHtml(playerName(id))} (${totals[id]})${id===g.winnerId?' 🏆</b>':''}${id===g.loserId?' 💩':''}`).join(" · ")}
-          </div>
-        </div>`;
-      }).join("");
+    const linkedRoom = (state.knownSharedRooms||[]).find(r=> r.name && r.name.toLowerCase()===s.name.toLowerCase());
+    if(linkedRoom){
+      html += `<div class="panel">
+        <p class="muted" style="margin:0 0 10px;">Ez a munkamenet egy megosztott szobához kapcsolódik (kód: ${escapeHtml(linkedRoom.code)}). Ha úgy érzed, hiányzik belőle egy lejátszott parti, próbáld meg újraszinkronizálni.</p>
+        <button class="btn btn-ghost" data-action="resyncSharedRoom" data-id="${linkedRoom.code}">Statisztika szinkronizálása</button>
+      </div>`;
+    }
+    html += `<div class="panel"><div class="panel-title" data-action="toggleSessionGamesExpanded" style="cursor:pointer;">Játékok ${ui.sessionGamesExpanded? "▾":"▸"}</div>`;
+    if(ui.sessionGamesExpanded){
+      if(sessionGames.length===0){
+        html += `<div class="empty-msg">Nincs még játék ebben a munkamenetben.</div>`;
+      } else {
+        html += sessionGames.sort((a,b)=>b.finishedAt-a.finishedAt).map(g=>{
+          const totals = computeTotals(g);
+          const dateStr = new Date(g.finishedAt).toLocaleDateString("hu-HU");
+          return `<div class="hist-card">
+            <div class="hist-top">
+              <span data-action="openGame" data-id="${g.id}" style="cursor:pointer;">${dateStr} · ${g.rounds.length} kör</span>
+              <span class="icon-btn" data-action="removeGameFromLocalSessionPrompt" data-id="${g.id}">×</span>
+            </div>
+            <div class="hist-players" data-action="openGame" data-id="${g.id}" style="cursor:pointer;">
+              ${g.seating.map(id=> `${id===g.winnerId?'<b>':''}${escapeHtml(playerName(id))} (${totals[id]})${id===g.winnerId?' 🏆</b>':''}${id===g.loserId?' 💩':''}`).join(" · ")}
+            </div>
+          </div>`;
+        }).join("");
+      }
     }
     html += `</div>`;
     if(!s.closed){
@@ -2925,6 +2938,8 @@
       case "goOnlineActive": ui.screen=id; render(); break;
       case "rejoinKnownRoom": rejoinKnownRoom(id); break;
       case "resyncSharedRoom": resyncSharedRoom(id); break;
+      case "toggleSessionGamesExpanded": ui.sessionGamesExpanded = !ui.sessionGamesExpanded; render(); break;
+      case "toggleRoomGamesExpanded": ui.roomGamesExpanded = !ui.roomGamesExpanded; render(); break;
       case "forgetSharedRoomPrompt": forgetSharedRoomPrompt(id); break;
       case "goOnlineCreate": ui.online.error=null; ui.online.hostName = state.myPlayerId? playerName(state.myPlayerId) : ui.online.hostName; ui.screen="onlineCreate"; render(); break;
       case "goOnlineManualSetup": {

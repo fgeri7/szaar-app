@@ -2719,9 +2719,12 @@
       const totals = computeTotals(g);
       const date = new Date(g.finishedAt);
       const dateStr = date.toLocaleDateString("hu-HU");
-      return `<div class="hist-card" data-action="openGame" data-id="${g.id}">
-        <div class="hist-top"><span>${dateStr}</span><span>${g.rounds.length} kör</span></div>
-        <div class="hist-players">
+      return `<div class="hist-card">
+        <div class="hist-top">
+          <span data-action="openGame" data-id="${g.id}" style="cursor:pointer;">${dateStr} · ${g.rounds.length} kör</span>
+          <span class="icon-btn" data-action="deleteGamePrompt" data-id="${g.id}">×</span>
+        </div>
+        <div class="hist-players" data-action="openGame" data-id="${g.id}" style="cursor:pointer;">
           ${g.seating.map(id=> `${id===g.winnerId?'<b>':''}${escapeHtml(playerName(id))} (${totals[id]})${id===g.winnerId?' 🏆</b>':''}${id===g.loserId?' 💩':''}`).join(" · ")}
         </div>
       </div>`;
@@ -2743,15 +2746,15 @@
       </div>`;
     });
     html += `</div>`;
-    const editable = g.mode!=="play";
+    const editable = true;
     html += `<div class="panel"><div class="panel-title">Körök</div>
-      ${editable? `<p class="muted" style="margin-top:-6px;">Koppints egy sorra, ha javítani szeretnéd.</p>` : ""}
+      <p class="muted" style="margin-top:-6px;">Koppints egy sorra, ha javítani szeretnéd.</p>
       <div style="overflow-x:auto;">
       <table class="score-grid">
         <thead><tr><th>Kör</th>${g.seating.map(id=>`<th>${escapeHtml(playerName(id)).slice(0,6)}</th>`).join("")}</tr></thead>
         <tbody>
-        ${g.rounds.map((r,idx)=>`<tr ${editable? `data-action="startEditRound" data-id="${idx}" style="cursor:pointer;"`:""}>
-          <td class="rnd">${r.n}${r.moonShooter? ' <span class="moon-tag">🐈‍⬛</span>':''}${editable? ' ✎':''}</td>
+        ${g.rounds.map((r,idx)=>`<tr data-action="startEditRound" data-id="${idx}" style="cursor:pointer;">
+          <td class="rnd">${r.n}${r.moonShooter? ' <span class="moon-tag">🐈‍⬛</span>':''} ✎</td>
           ${g.seating.map(id=>`<td>${r.scores[id]||0}</td>`).join("")}
         </tr>`).join("")}
         </tbody>
@@ -2759,7 +2762,8 @@
       </table>
       </div>
     </div>
-    ${editable? renderRoundEditForm(g) : ""}
+    ${renderRoundEditForm(g)}
+    <button class="btn btn-danger" data-action="deleteGamePrompt" data-id="${g.id}">Játék törlése</button>
     <button class="btn btn-primary" data-action="goPlaySetup">Új kártyajáték</button>
     <button class="btn btn-ghost" data-action="goNewGame">Kézi pontszámlálás</button>
     <button class="btn btn-ghost" data-action="goDashboard">Vissza a főoldalra</button>
@@ -4581,7 +4585,9 @@
       type: "deleteGame",
       gameId,
       title: "Játék törlése",
-      body: "Törlöd ezt a félbehagyott játékot? A pontok nem kerülnek be az előzményekbe/statisztikába. Ez nem vonható vissza.",
+      body: g.finished
+        ? "Törlöd ezt a lezárt játékot? Ki fog kerülni az előzményekből és a statisztikából. Ez nem vonható vissza."
+        : "Törlöd ezt a félbehagyott játékot? A pontok nem kerülnek be az előzményekbe/statisztikába. Ez nem vonható vissza.",
       confirmLabel: "Törlés",
       cancelLabel: "Mégse"
     };

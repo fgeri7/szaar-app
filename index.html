@@ -3500,10 +3500,8 @@
     roomDocRef(code).get().then(function(doc){
       if(!doc.exists){ showToast("Ez a szoba már nem létezik."); forgetSharedRoom(code); render(); return; }
       const room = doc.data();
-      const before = state.games.length;
-      maybeSaveOnlineGameLocally(room);
-      const pulledIn = state.games.length - before;
-      showToast(pulledIn>0 ? `${pulledIn} új parti szinkronizálva.` : "Nincs új parti, minden szinkronban van.");
+      const changed = maybeSaveOnlineGameLocally(room);
+      showToast(changed ? "Szinkronizálva — a helyi statisztika frissült." : "Nincs eltérés, minden szinkronban van.");
       return;
 
       /* A "helyi -> szoba" visszaírási irány ideiglenesen KIKAPCSOLVA egy gyanús
@@ -4160,15 +4158,14 @@
     if(room.kind==="manual"){
       const allGames = getAllSessionGames(room);
       if(allGames.length===0) return;
-      const newOnes = allGames.filter(g=>!state.games.some(sg=>sg.id===g.id));
-      if(newOnes.length===0) return;
       const sessionName = room.name || "Megosztott parti";
       let session = state.sessions.find(s=>s.name.toLowerCase()===sessionName.toLowerCase());
       if(!session){
         session = { id: uid(), name: sessionName, createdAt: Date.now(), closed: false, closedAt: null };
         state.sessions.push(session);
       }
-      newOnes.forEach(g=>{
+      let changed = false;
+      allGames.forEach(g=>{
         const seatingNames = g.seatingNames || {};
         const idMap = {};
         Object.keys(seatingNames).forEach(seatId=>{
@@ -4188,26 +4185,42 @@
         localRounds.forEach(r=> localSeating.forEach(id=>{ totals[id]+=(r.scores[id]||0); }));
         let winner=localSeating[0], loser=localSeating[0];
         localSeating.forEach(id=>{ if(totals[id]<totals[winner]) winner=id; if(totals[id]>totals[loser]) loser=id; });
-        state.games.push({
-          id: g.id, createdAt: g.createdAt, targetScore: g.targetScore,
-          startingDealerIndex: g.startingDealerIndex||0,
-          seating: localSeating, rounds: localRounds, finished: true, finishedAt: g.finishedAt||Date.now(),
-          winnerId: winner, loserId: loser, sessionId: session.id, sharedRoomCode: room.code
-        });
+
+        const existingIdx = state.games.findIndex(sg=>sg.id===g.id);
+        if(existingIdx===-1){
+          state.games.push({
+            id: g.id, createdAt: g.createdAt, targetScore: g.targetScore,
+            startingDealerIndex: g.startingDealerIndex||0,
+            seating: localSeating, rounds: localRounds, finished: true, finishedAt: g.finishedAt||Date.now(),
+            winnerId: winner, loserId: loser, sessionId: session.id, sharedRoomCode: room.code
+          });
+          changed = true;
+        } else {
+          const existing = state.games[existingIdx];
+          const differs = JSON.stringify(existing.seating)!==JSON.stringify(localSeating)
+            || JSON.stringify(existing.rounds)!==JSON.stringify(localRounds)
+            || existing.winnerId!==winner || existing.loserId!==loser;
+          if(differs){
+            state.games[existingIdx] = Object.assign({}, existing, {
+              seating: localSeating, rounds: localRounds, winnerId: winner, loserId: loser
+            });
+            changed = true;
+          }
+        }
       });
-      saveState();
-      render();
-      return;
+      if(changed){ saveState(); render(); }
+      return changed;
     }
-    if(!game || !game.finished) return;
-    if(savedOnlineGameIds[game.id]) return;
+    if(!game || !game.finished) return false;
+    if(savedOnlineGameIds[game.id]) return false;
     savedOnlineGameIds[game.id] = true;
-    if(state.games.some(g=>g.id===game.id)) return;
-    if(!game.humanIds.includes(ui.online.deviceId)) return;
+    if(state.games.some(g=>g.id===game.id)) return false;
+    if(!game.humanIds.includes(ui.online.deviceId)) return false;
     const localCopy = Object.assign({}, game, { sessionId: state.activeSessionId || null });
     state.games.push(localCopy);
     saveState();
     render();
+    return true;
   }
 
   function resumeOnlineSession(){

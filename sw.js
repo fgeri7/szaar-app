@@ -1,4 +1,4 @@
-const CACHE_NAME = "szar-cache-v29";
+const CACHE_NAME = "szar-cache-v30";
 const CORE_ASSETS = [
   "./index.html",
   "./manifest.json",

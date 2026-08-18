@@ -1711,6 +1711,8 @@
       html += renderSessionGamesList(room, null);
     }
 
+    html += `<button class="btn btn-ghost" data-action="resyncSharedRoom" data-id="${room.code}">Statisztika szinkronizálása (helyi mentés)</button>`;
+
     if(ui.online.isHost){
       html += `<button class="btn btn-danger" data-action="closeSharedSessionPrompt">Munkamenet lezárása (minden asztal)</button>`;
     } else {
@@ -2584,6 +2586,13 @@
       <div class="panel-title">${escapeHtml(s.name)}</div>
       <p class="muted" style="margin-top:-6px;">${s.closed ? `Lezárva: ${new Date(s.closedAt).toLocaleDateString("hu-HU")}` : "Aktív munkamenet"}</p>
     </div>`;
+    const linkedRoom = (state.knownSharedRooms||[]).find(r=> r.name && r.name.toLowerCase()===s.name.toLowerCase());
+    if(linkedRoom){
+      html += `<div class="panel">
+        <p class="muted" style="margin:0 0 10px;">Ez a munkamenet egy megosztott szobához kapcsolódik (kód: ${escapeHtml(linkedRoom.code)}). Ha úgy érzed, hiányzik belőle egy lejátszott parti, próbáld meg újraszinkronizálni.</p>
+        <button class="btn btn-ghost" data-action="resyncSharedRoom" data-id="${linkedRoom.code}">Statisztika szinkronizálása</button>
+      </div>`;
+    }
     const sessionGames = state.games.filter(g=>g.finished && g.sessionId===s.id);
     const playerIds = Array.from(new Set(sessionGames.flatMap(g=>g.seating))).filter(id=> state.players.some(p=>p.id===id));
     html += `<div class="panel"><div class="panel-title">Statisztika</div>`;
@@ -2837,6 +2846,7 @@
       case "goOnlineHome": ui.online.error=null; ui.screen="onlineHome"; render(); break;
       case "goOnlineActive": ui.screen=id; render(); break;
       case "rejoinKnownRoom": rejoinKnownRoom(id); break;
+      case "resyncSharedRoom": resyncSharedRoom(id); break;
       case "forgetSharedRoomPrompt": forgetSharedRoomPrompt(id); break;
       case "goOnlineCreate": ui.online.error=null; ui.online.hostName = state.myPlayerId? playerName(state.myPlayerId) : ui.online.hostName; ui.screen="onlineCreate"; render(); break;
       case "goOnlineManualSetup": {
@@ -3398,6 +3408,18 @@
     }, function(err){ console.warn("Szoba figyelési hiba", err); });
   }
 
+  function resyncSharedRoom(code){
+    if(!isFirebaseAvailable()){ showToast("A hálózati kapcsolat nem érhető el."); return; }
+    roomDocRef(code).get().then(function(doc){
+      if(!doc.exists){ showToast("Ez a szoba már nem létezik."); forgetSharedRoom(code); render(); return; }
+      const room = doc.data();
+      const before = state.games.length;
+      maybeSaveOnlineGameLocally(room);
+      const after = state.games.length;
+      showToast(after>before ? `${after-before} új parti szinkronizálva.` : "Nincs új parti, minden szinkronban van.");
+    }).catch(function(e){ showToast("Nem sikerült szinkronizálni: "+(e.message||"")); });
+  }
+
   function rejoinKnownRoom(code){
     if(!isFirebaseAvailable()){ showToast("A hálózati kapcsolat nem érhető el."); return; }
     const ref = roomDocRef(code);
@@ -3636,7 +3658,11 @@
       ui.moonMode = false;
       ui.moonPlayer = null;
       render();
-    }).catch(e=>{ showToast(e.message||"Hiba történt."); });
+    }).catch(e=>{
+      showToast((e.message||"Hiba történt.")+" Próbáld újra az asztal-listából.");
+      ui.online.activeTableId = null;
+      render();
+    });
   }
 
   function closeSharedSessionPrompt(){

@@ -1910,6 +1910,10 @@
         <span class="total-val">${totals[id]} ${remainingLabel(totals[id], g.targetScore)}</span>
       </div>`;
     });
+    if(ui.online.isHost){
+      html += `<button class="btn btn-ghost" data-action="fixGameNamesPrompt" data-id="${g.id}" style="margin-top:10px;">Nevek javítása (ha összekeveredtek)</button>`;
+    }
+    html += renderFixGameNamesForm(g);
     html += `</div>`;
 
     html += `<div class="panel">
@@ -4002,7 +4006,8 @@
     const code = ui.online.code;
     sessionLevelTransactionUpdate(code, function(room){
       const games = getAllSessionGames(room);
-      const target = games.find(g=>g.id===gameId);
+      const liveTables = Object.values(room.tables||{});
+      const target = games.find(g=>g.id===gameId) || liveTables.find(g=>g && g.id===gameId) || (room.game && room.game.id===gameId ? room.game : null);
       if(!target) throw new Error("Ez a parti már nem található.");
       const newSeatingNames = Object.assign({}, target.seatingNames);
       target.seating.forEach(id=>{

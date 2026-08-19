@@ -1842,6 +1842,7 @@
     const tables = room.tables || (room.game ? {__legacy__: room.game} : {});
     const g = tables[tableId];
     if(!g) return `<div class="panel"><div class="empty-msg">Ez az asztal már nem létezik.</div></div>`;
+    const nameOf = (id)=> (g.seatingNames && g.seatingNames[id]) || playerName(id);
     const totals = computeTotals(g);
     let html = `<div class="back-link" data-action="backToSessionHome">‹ Asztalok</div> <div class="back-link" data-action="leaveOnlineRoom" style="color:var(--wine-bright); margin-left:14px;">Kilépés a szobából</div>`;
 
@@ -1856,7 +1857,7 @@
       html += `<div class="panel"><div class="panel-title">Vége ennek a partinak (${escapeHtml(g.label||"Asztal")})</div>`;
       [...g.seating].sort((a,b)=>totals[a]-totals[b]).forEach(id=>{
         html += `<div class="total-row">
-          <span class="total-name">${escapeHtml(playerName(id))}${id===g.winnerId? ' <span class="leader-tag">GYŐZTES</span>':''}${id===g.loserId? ' 💩':''}</span>
+          <span class="total-name">${escapeHtml(nameOf(id))}${id===g.winnerId? ' <span class="leader-tag">GYŐZTES</span>':''}${id===g.loserId? ' 💩':''}</span>
           <span class="total-val">${totals[id]}</span>
         </div>`;
       });
@@ -1882,21 +1883,21 @@
     html += `<div class="panel pass-card">
       <div class="pass-round-label">${roundN}. kör</div>
       <div class="pass-direction-label">${DIR_LABEL[dir]}</div>
-      <p class="muted" style="margin:2px 0 0;">Osztó: ${escapeHtml(playerName(dealerId))}</p>
+      <p class="muted" style="margin:2px 0 0;">Osztó: ${escapeHtml(nameOf(dealerId))}</p>
       <div class="muted" style="margin-bottom:14px;">${DIR_SUB[dir]}</div>`;
     if(dir==="hold"){
       html += `<div class="cat-sleep">🐈‍⬛💤</div>`;
     } else if(dir==="across"){
       html += `<div class="pass-cross-note">
-        <b>${escapeHtml(playerName(g.seating[0]))}</b> ⇄ <b>${escapeHtml(playerName(g.seating[2]))}</b><br>
-        <b>${escapeHtml(playerName(g.seating[1]))}</b> ⇄ <b>${escapeHtml(playerName(g.seating[3]))}</b>
+        <b>${escapeHtml(nameOf(g.seating[0]))}</b> ⇄ <b>${escapeHtml(nameOf(g.seating[2]))}</b><br>
+        <b>${escapeHtml(nameOf(g.seating[1]))}</b> ⇄ <b>${escapeHtml(nameOf(g.seating[3]))}</b>
       </div>`;
     } else {
       const order = dir==="left" ? [0,1,2,3] : [0,3,2,1];
       let pairs = [];
       for(let i=0;i<4;i++){
         const fromIdx = order[i], toIdx = order[(i+1)%4];
-        pairs.push(`<b>${escapeHtml(playerName(g.seating[fromIdx]))}</b> → <b>${escapeHtml(playerName(g.seating[toIdx]))}</b>`);
+        pairs.push(`<b>${escapeHtml(nameOf(g.seating[fromIdx]))}</b> → <b>${escapeHtml(nameOf(g.seating[toIdx]))}</b>`);
       }
       html += `<div class="pass-cross-note">${pairs.join("<br>")}</div>`;
     }
@@ -1905,7 +1906,7 @@
     html += `<div class="panel"><div class="panel-title">Állás</div>`;
     [...g.seating].sort((a,b)=>totals[a]-totals[b]).forEach(id=>{
       html += `<div class="total-row">
-        <span class="total-name">${escapeHtml(playerName(id))}</span>
+        <span class="total-name">${escapeHtml(nameOf(id))}</span>
         <span class="total-val">${totals[id]} ${remainingLabel(totals[id], g.targetScore)}</span>
       </div>`;
     });
@@ -1922,7 +1923,7 @@
         <label class="field-label">Ki vitte el mindet?</label>
         <select id="moonPlayerSelect" style="width:100%;padding:10px;border-radius:5px;background:rgba(0,0,0,0.25);color:var(--cream);border:1px solid var(--line);font-size:14px;">
           <option value="">Válassz…</option>
-          ${g.seating.map(id=>`<option value="${id}" ${ui.moonPlayer===id?"selected":""}>${escapeHtml(playerName(id))}</option>`).join("")}
+          ${g.seating.map(id=>`<option value="${id}" ${ui.moonPlayer===id?"selected":""}>${escapeHtml(nameOf(id))}</option>`).join("")}
         </select>
       </div>`;
     } else {
@@ -1934,7 +1935,7 @@
       html += g.seating.map(id=>{
         const v = ui.roundInputs[id];
         return `<div class="round-input-row">
-          <span class="rname">${escapeHtml(playerName(id))}</span>
+          <span class="rname">${escapeHtml(nameOf(id))}</span>
           <input type="number" min="0" class="round-input" data-id="${id}" value="${v===undefined?'':v}" placeholder="0">
         </div>`;
       }).join("");
@@ -1951,7 +1952,7 @@
         <p class="muted" style="margin-top:-6px;">Koppints egy sorra, ha javítani szeretnéd.</p>
         <div style="overflow-x:auto;">
         <table class="score-grid">
-          <thead><tr><th>Kör</th>${g.seating.map(id=>`<th>${escapeHtml(playerName(id)).slice(0,6)}</th>`).join("")}</tr></thead>
+          <thead><tr><th>Kör</th>${g.seating.map(id=>`<th>${escapeHtml(nameOf(id)).slice(0,6)}</th>`).join("")}</tr></thead>
           <tbody>
           ${g.rounds.map((r,idx)=>`<tr data-action="startEditRound" data-id="${idx}" style="cursor:pointer;">
             <td class="rnd">${r.n}${r.moonShooter? ' <span class="moon-tag">🐈‍⬛</span>':''} ✎</td>
@@ -2001,7 +2002,7 @@
             </span>
           </div>
           <div class="hist-players">
-            ${gm.seating.map(id=> `${id===gm.winnerId?'<b>':''}${escapeHtml((gm.seatingNames&&gm.seatingNames[id])||playerName(id))} (${totals[id]})${id===gm.winnerId?' 🏆</b>':''}${id===gm.loserId?' 💩':''}`).join(" · ")}
+            ${gm.seating.map(id=> `${id===gm.winnerId?'<b>':''}${escapeHtml((gm.seatingNames&&gm.seatingNames[id])||nameOf(id))} (${totals[id]})${id===gm.winnerId?' 🏆</b>':''}${id===gm.loserId?' 💩':''}`).join(" · ")}
           </div>
           ${renderFixGameNamesForm(gm)}
         </div>`;
@@ -2040,7 +2041,7 @@
     games.forEach(gm=>{
       const totals = computeTotals(gm);
       gm.seating.forEach(seatId=>{
-        const name = (gm.seatingNames && gm.seatingNames[seatId]) || playerName(seatId);
+        const name = (gm.seatingNames && gm.seatingNames[seatId]) || nameOf(seatId);
         const key = name.toLowerCase();
         if(!statsByName[key]) statsByName[key] = { name, played:0, wins:0, losses:0, totalScore:0 };
         statsByName[key].played++;
@@ -4423,14 +4424,14 @@
         <label class="field-label">Ki vitte el mindet?</label>
         <select id="editMoonPlayerSelect" style="width:100%;padding:10px;border-radius:5px;background:rgba(0,0,0,0.25);color:var(--cream);border:1px solid var(--line);font-size:14px;">
           <option value="">Válassz…</option>
-          ${g.seating.map(id=>`<option value="${id}" ${ui.editRoundMoonPlayer===id?"selected":""}>${escapeHtml(playerName(id))}</option>`).join("")}
+          ${g.seating.map(id=>`<option value="${id}" ${ui.editRoundMoonPlayer===id?"selected":""}>${escapeHtml((g.seatingNames&&g.seatingNames[id])||playerName(id))}</option>`).join("")}
         </select>
       </div>`;
     } else {
       html += g.seating.map(id=>{
         const v = ui.editRoundInputs[id];
         return `<div class="round-input-row">
-          <span class="rname">${escapeHtml(playerName(id))}</span>
+          <span class="rname">${escapeHtml((g.seatingNames&&g.seatingNames[id])||playerName(id))}</span>
           <input type="number" min="0" class="edit-round-input" data-id="${id}" value="${v===undefined?'':v}" placeholder="0">
         </div>`;
       }).join("");
